@@ -1,0 +1,55 @@
+
+import "core"
+import "doc"
+import "std/fileio"
+
+default_region_settings()
+
+document(ボイロズ) {}
+
+voiceroids := array[
+  "hello ゆかりん！",
+  "hello マキマキ！"
+]
+
+section(test) {
+  # call for (i : range(0, length(voiceroids)-1)) {
+  #   p(voiceroids!i)
+  # }
+  list {
+    Yukari
+    Maki
+  }
+  nlist {
+    Yukari
+    Maki
+  }
+  code {
+    fn id(x Int) Int {
+      x
+    }
+  }
+}
+
+subsection(About) {
+  *結月ゆかり*　CV:石黒千尋　　URL <http://www.ah-soft.com/voiceroid/yukari/>
+  *弦巻マキ*　　CV:民安ともえ　URL <https://www.ah-soft.com/voiceroid/tsurumaki/>
+}
+
+subsection(Newbie) {
+  紲星あかり　CV：???  [URL]<http://www.ah-soft.com/voiceroid/akari/>
+}
+
+#
+# generator
+#
+
+src := s""
+push(src, "<html><head><title>")
+push(src, title_src)
+push(src, "</title><link rel='stylesheet' type='text/css' href='style.css'></head>")
+push(src, "<body>")
+push(src, doc_src)
+push(src, "</body></html>")
+
+write_file("output.html", to_cs(src))

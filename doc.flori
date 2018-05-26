@@ -1,0 +1,231 @@
+
+import "core"
+import "core/pointer"
+
+enum DocSynState {
+  DOC_SYN_NONE
+  DOC_SYN_STRONG
+  DOC_SYN_ITALIC
+  DOC_SYN_LINK
+}
+
+primitives := array[
+  "call",
+  "code",
+  "list",
+  "nlist"
+]
+
+fn is_primitive(line FExpr) Bool $[compiletime] {
+  if (kind(line) == FEXPR_SEQ && length(line) >= 1) {
+    for (i : range(0, length(primitives)-1)) {
+      if (primitives!i == to_cs(line!0)) {
+        return(true)
+      }
+    }
+    false
+  } else {
+    false
+  }
+}
+
+macro inner(t FExpr) FExpr {
+  quote {
+    push(doc_src, `t)
+  }
+}
+
+#
+# Processor
+#
+
+fn line_processor(line FExpr) FExpr $[compiletime] {
+  s := s""
+  state := DOC_SYN_NONE
+  statestr := s""
+  linkstr := s""
+  for (c : replace(get_srcexpr(line), "\n"!0, "\\n")) {
+    if (c == c"*" && state == DOC_SYN_STRONG) {
+      push(s, "<strong>")
+      push(s, statestr)
+      push(s, "</strong>")
+      state = DOC_SYN_NONE
+      statestr = s""
+    } elif (c == c"*" && state == DOC_SYN_NONE) {
+      state = DOC_SYN_STRONG
+    } elif (c == c"/" && state == DOC_SYN_ITALIC) {
+      push(s, "<i>")
+      push(s, statestr)
+      push(s, "</i>")
+      state = DOC_SYN_NONE
+      statestr = s""
+    } elif (c == c"/" && state == DOC_SYN_NONE) {
+      state = DOC_SYN_ITALIC
+    } elif (c == c"[" && state == DOC_SYN_NONE) {
+      state = DOC_SYN_LINK
+    } elif (c == c"]") {
+      linkstr = statestr
+      state = DOC_SYN_NONE
+      statestr = s""
+    } elif (c == c"<" && state == DOC_SYN_NONE) {
+      state = DOC_SYN_LINK
+    } elif (c == c">") {
+      push(s, "<a href='")
+      push(s, statestr)
+      push(s, "'>")
+      if (length(linkstr) != 0) {
+        push(s, linkstr)
+        linkstr = s""
+      } else {
+        push(s, statestr)
+      }
+      push(s, "</a>")
+      state = DOC_SYN_NONE
+      statestr = s""
+    } elif (state == DOC_SYN_NONE) {
+      push(s, c)
+    } else {
+      push(statestr, c)
+    }
+  }
+  new_fstrlit(to_cs(s))
+}
+
+fn section_processor(content FExpr) FExpr $[compiletime] {
+  ret := quote {}
+  for (line : content) {
+    if (is_primitive(line)) {
+      push(ret, line)
+    } else {
+      processed := line_processor(line)
+      push(ret, quote {
+          inner("<p>")
+          inner(`processed)
+          inner("</p>")
+        })
+    }
+  }
+  ret
+}
+
+#
+# Primitives
+#
+
+syntax call(fexpr FExpr) FExpr {
+  newseq := new_fseq()
+  for (i : range(1, length(fexpr)-1)) {
+    push(newseq, fexpr!i)
+  }
+  newseq
+}
+macro code(body FBlock) FExpr $[syntax] {
+  codestr := s""
+  ret := quote {
+    inner("<pre><code>")
+  }
+  push(ret, section_processor(body))
+  push(ret, quote {
+      inner("</code></pre>")
+    })
+  ret
+}
+macro list(body FBlock) FExpr $[syntax] {
+  ret := quote {
+    inner("<ul>")
+  }
+  for (line : body) {
+    linelit := line_processor(line)
+    push(ret, quote {
+        inner("<li>")
+        inner(`linelit)
+        inner("</li>")
+      })
+  }
+  push(ret, quote {
+      inner("</ul>")
+    })
+  ret
+}
+macro nlist(body FBlock) FExpr $[syntax] {
+  ret := quote {
+    inner("<ol>")
+  }
+  for (line : body) {
+    linelit := line_processor(line)
+    push(ret, quote {
+        inner("<li>")
+        inner(`linelit)
+        inner("</li>")
+      })
+  }
+  push(ret, quote {
+      inner("</ol>")
+    })
+  ret
+}
+
+#
+# Toplevel macros
+#
+
+macro document(title FList, info FBlock) FExpr $[syntax] {
+  titlelit := new_fstrlit(get_srcexpr(title!0))
+  quote {
+    doc_src := s""
+    title_src := s `titlelit
+  }
+}
+
+fn title_processor(f FList) FExpr $[compiletime] {
+  s := s""
+  for (e : f) {
+    push(s, get_srcexpr(e))
+  }
+  new_fstrlit(to_cs(s))
+}
+
+macro section(title FList, content FBlock) FExpr $[syntax] {
+  titlelit := title_processor(title)
+  ret := quote {
+    push(doc_src, "<section>")
+    push(doc_src, "<h1>")
+    push(doc_src, `titlelit)
+    push(doc_src, "</h1>")
+  }
+  push(ret, section_processor(content))
+  push(ret, quote {
+      push(doc_src, "</section>")
+    })
+  ret
+}
+
+macro subsection(title FList, content FBlock) FExpr $[syntax] {
+  titlelit := title_processor(title)
+  ret := quote {
+    push(doc_src, "<section>")
+    push(doc_src, "<h2>")
+    push(doc_src, `titlelit)
+    push(doc_src, "</h2>")
+  }
+  push(ret, section_processor(content))
+  push(ret, quote {
+      push(doc_src, "</section>")
+    })
+  ret
+}
+macro text(content FExpr) FExpr {
+  section_processor(content)
+}
+
+#
+# Utils
+#
+
+macro p(t FExpr) FExpr {
+  quote {
+    push(doc_src, "<p>")
+    push(doc_src, `t)
+    push(doc_src, "</p>")
+  }
+}
